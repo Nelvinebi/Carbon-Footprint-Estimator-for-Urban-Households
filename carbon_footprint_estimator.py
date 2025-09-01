@@ -1,0 +1,131 @@
+
+"""
+Carbon-Footprint-Estimator-for-Urban-Households
+------------------------------------------------
+End-to-end example that loads a synthetic dataset of urban household attributes,
+trains a regression model to estimate annual carbon footprint (kg CO2e),
+evaluates it, and shows a quick estimator utility.
+"""
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from sklearn.model_selection import train_test_split
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.ensemble import RandomForestRegressor
+import matplotlib.pyplot as plt
+import joblib
+
+DATA_PATH = Path("carbon_footprint_dataset.csv")
+MODEL_PATH = Path("carbon_footprint_model.pkl")
+
+def load_data(path: Path = DATA_PATH) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    return df
+
+def build_pipeline(categorical_features, numeric_features):
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_features),
+            ("num", StandardScaler(), numeric_features),
+        ]
+    )
+    model = RandomForestRegressor(
+        n_estimators=350,
+        max_depth=None,
+        min_samples_split=2,
+        min_samples_leaf=1,
+        random_state=42,
+        n_jobs=-1
+    )
+    pipe = Pipeline(steps=[("prep", preprocessor), ("model", model)])
+    return pipe
+
+def train_and_eval(df: pd.DataFrame):
+    target = "annual_kg_co2e"
+    y = df[target].values
+    X = df.drop(columns=[target])
+
+    categorical_features = ["dwelling_type", "diet_type", "city_density", "climate_zone"]
+    numeric_features = [c for c in X.columns if c not in categorical_features]
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    pipe = build_pipeline(categorical_features, numeric_features)
+    pipe.fit(X_train, y_train)
+    preds = pipe.predict(X_test)
+
+    mae = mean_absolute_error(y_test, preds)
+    rmse = mean_squared_error(y_test, preds, squared=False)
+    r2 = r2_score(y_test, preds)
+
+    print(f"Test MAE: {mae:,.1f} kg CO2e")
+    print(f"Test RMSE: {rmse:,.1f} kg CO2e")
+    print(f"Test R^2: {r2:.3f}")
+
+    # Save model
+    joblib.dump(pipe, MODEL_PATH)
+    print(f"Saved trained model to: {MODEL_PATH.resolve()}")
+
+    # Feature importance (approximate via permutation on test set would be ideal, but
+    # here we use underlying RF feature importances for speed/illustration).
+    rf = pipe.named_steps["model"]
+    # Get feature names from preprocessor
+    ohe = pipe.named_steps["prep"].named_transformers_["cat"]
+    cat_names = list(ohe.get_feature_names_out(categorical_features))
+    feature_names = cat_names + numeric_features
+    importances = rf.feature_importances_
+    # Aggregate one-hot importances back to original categorical field groups
+    agg = {}
+    # Map categorical groupings
+    for base in categorical_features:
+        base_cols = [i for i, name in enumerate(cat_names) if name.startswith(base + "_")]
+        agg[base] = float(importances[:len(cat_names)][base_cols].sum()) if base_cols else 0.0
+    # Numeric features
+    for i, name in enumerate(numeric_features):
+        agg[name] = float(importances[len(cat_names) + i])
+
+    # Sort and plot
+    sorted_items = sorted(agg.items(), key=lambda kv: kv[1], reverse=True)[:15]
+    labels, vals = zip(*sorted_items)
+
+    plt.figure(figsize=(9, 6))
+    plt.barh(labels[::-1], vals[::-1])
+    plt.title("Top Feature Importances (Random Forest)")
+    plt.xlabel("Importance")
+    plt.tight_layout()
+    plt.show()
+
+    return pipe
+
+def quick_estimate(pipe):
+    # Example household for demonstration
+    sample = pd.DataFrame([{
+        "household_size": 4,
+        "income_usd": 45000,
+        "dwelling_type": "apartment",
+        "appliances_count": 18,
+        "vehicle_count": 1,
+        "avg_vehicle_km_per_year": 8500,
+        "electricity_kwh_year": 3200,
+        "gas_therms_year": 0,
+        "water_m3_year": 260,
+        "waste_kg_year": 800,
+        "diet_type": "reduced_meat",
+        "air_travel_km_year": 1200,
+        "city_density": "high",
+        "climate_zone": "tropical",
+        "renewable_pct": 0.35
+    }])
+    est = pipe.predict(sample)[0]
+    print(f"Estimated annual footprint for example household: {est:,.0f} kg CO2e")
+
+if __name__ == "__main__":
+    df = load_data(DATA_PATH)
+    print(f"Loaded dataset with shape: {df.shape}")
+    pipe = train_and_eval(df)
+    quick_estimate(pipe)
