@@ -70,9 +70,14 @@ Add time-series analysis for seasonal variation
 
 Build a simple web app for user-friendly household footprint estimation
 
-pgsql
-Copy code
 
-Author Name: Agbozu Ebingiye Nelvin
+
+Author
+
+Name: Agbozu Ebingiye Nelvin
+
 Email: nelvinebingiye@gmail.com
+
 Github: https://github.com/Nelvinebi/
+
+LinkedIn: *https://www.linkedin.com/in/agbozu-ebi/
